@@ -1,0 +1,90 @@
+// ─── Action Types ───────────────────────────────────────────────────────────
+
+export type ActionType =
+  | 'open_app'
+  | 'open_file'
+  | 'open_folder'
+  | 'open_browser'
+  | 'search_web'
+  | 'run_command'
+  | 'create_file'
+  | 'write_file'
+  | 'read_file'
+  | 'delete_file'
+  | 'clone_repo'
+  | 'generate_content'
+  | 'multi_step'
+  | 'chat'
+  | 'unknown';
+
+// ─── Structured Command from AI ─────────────────────────────────────────────
+
+export interface AICommand {
+  action: ActionType;
+  params: Record<string, string | string[] | boolean | number>;
+}
+
+export interface TaskPlan {
+  id: string;
+  originalMessage: string;
+  steps: TaskStep[];
+  status: TaskStatus;
+  createdAt: Date;
+}
+
+export interface TaskStep {
+  order: number;
+  command: AICommand;
+  description: string;
+  status: TaskStatus;
+  result?: string;
+  error?: string;
+}
+
+export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+// ─── Execution Result ───────────────────────────────────────────────────────
+
+export interface ExecutionResult {
+  success: boolean;
+  message: string;
+  data?: unknown;
+}
+
+// ─── Application Registry Entry ─────────────────────────────────────────────
+
+export interface AppRegistryEntry {
+  name: string;
+  aliases: string[];
+  command: string;
+  path?: string;
+}
+
+// ─── Security ───────────────────────────────────────────────────────────────
+
+export interface SecurityCheck {
+  allowed: boolean;
+  reason?: string;
+  requiresConfirmation?: boolean;
+}
+
+// ─── Ollama Types ───────────────────────────────────────────────────────────
+
+export interface OllamaGenerateRequest {
+  model: string;
+  prompt: string;
+  stream: boolean;
+  format?: 'json';
+  options?: {
+    temperature?: number;
+    top_p?: number;
+    num_predict?: number;
+  };
+}
+
+export interface OllamaGenerateResponse {
+  model: string;
+  response: string;
+  done: boolean;
+  total_duration?: number;
+}
