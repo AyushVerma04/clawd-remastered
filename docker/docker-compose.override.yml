@@ -1,0 +1,8 @@
+# Syntax: docker-compose.override.yml (place next to docker-compose.yml)
+# This file removes GPU reservation for systems without NVIDIA GPUs.
+version: '3.8'
+
+services:
+  ollama:
+    deploy:
+      resources: {}

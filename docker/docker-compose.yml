@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: clawd-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  clawd-app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: clawd-app
+    env_file:
+      - ../config/env/.env
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - /:/host:ro
+      - clawd-data:/app/data
+    network_mode: host
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama-data:
+  clawd-data:
