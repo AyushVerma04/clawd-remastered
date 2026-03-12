@@ -52,6 +52,11 @@ export class CommandRunner {
 
   /** Execute a shell command with safety checks. */
   async execute(command: string, cwd?: string): Promise<ExecutionResult> {
+    // Sanitize cwd: "/" is invalid on Windows and a bad default everywhere
+    if (cwd === '/' || cwd === '\\') {
+      cwd = os.homedir();
+    }
+
     // Block dangerous commands
     if (this.isBlocked(command)) {
       logger.warn(`Blocked dangerous command: ${command}`);

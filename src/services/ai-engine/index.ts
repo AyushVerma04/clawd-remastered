@@ -2,6 +2,36 @@ import axios, { AxiosInstance } from 'axios';
 import { config } from '../../config';
 import { AICommand, OllamaGenerateRequest, OllamaGenerateResponse } from '../../shared/types';
 import logger from '../../shared/logger';
+import groqEngine from '../groq-engine';
+import memoryService from '../memory';
+
+// ─── Patterns that indicate a task needs Groq (planning, repo ops, deploy) ──
+
+const COMPLEX_TASK_PATTERNS = [
+  // Project creation → search & clone a real repo, then open in editor
+  /create\s+(a\s+)?(game|app|application|website|web\s*app|project|program|script|bot|tool)/i,
+  /build\s+(a\s+)?(game|app|application|website|project|program|bot)/i,
+  /develop\s+(a\s+)?(game|app|website|project)/i,
+  // Scaffolding commands (React, Next, Vite, etc.)
+  /new\s+(react|next(\.?js)?|vue|angular|vite|svelte)\s+(app|project)/i,
+  /npx\s+create-/i,
+  // Repo operations
+  /clone\s+(a\s+|the\s+)?(repo|repository|project)/i,
+  /pull\s+(a\s+|the\s+)?(repo|repository|project)/i,
+  /find\s+(a?\s+)?(github|repo|repository)\s+(for|about)/i,
+  /search\s+(github|for\s+a\s+repo)/i,
+  /open\s+(in|with)\s+(cursor|windsurf|vscode|vs\s*code|editor)/i,
+  // Deploy / git
+  /deploy\s+(to\s+)?(github|heroku|vercel|netlify|production)/i,
+  /push\s+(to\s+)?(github|git|remote)/i,
+  // Other complex actions
+  /send\s+(an?\s+)?email/i,
+  /notion/i,
+  /analyze\s+(the\s+)?(screen|error|screenshot|image|code)/i,
+  /what('s|\s+is)\s+(the\s+)?(error|bug|problem|issue).*screen/i,
+  /take\s+a\s+screenshot/i,
+  /remember\s+(my|that|this)/i,
+];
 
 // ─── Rule-based fast-path patterns (no LLM needed) ──────────────────────────
 
@@ -294,6 +324,8 @@ Rules:
 5. Resolve common folder names (e.g., "downloads" → user's Downloads folder path, "desktop" → Desktop folder).
 6. If a command involves creating content, use "generate_content" first then "create_file".
 7. Do NOT include explanations outside the JSON. Output ONLY the JSON object.
+8. NEVER use placeholder or fake GitHub URLs (e.g. do NOT use "https://github.com/user/repo.git" or any URL with "user" as the owner). If the user asks to CREATE a project, game, or app, write the actual code using "create_file" steps — do NOT clone a repo.
+9. When specifying "cwd" in "run_command", always use a valid absolute Windows path (e.g. "C:\\Users\\username") or omit "cwd" entirely. NEVER set "cwd" to "/".
 
 Examples:
 
@@ -345,19 +377,37 @@ User: "How are you?"
     }
   }
 
+  /** Returns true if the message requires Groq-level reasoning (code gen, deploy, etc.). */
+  private isComplexTask(message: string): boolean {
+    return COMPLEX_TASK_PATTERNS.some((p) => p.test(message));
+  }
+
   /** Parse a user message into a structured AICommand. */
   async parseIntent(userMessage: string, context?: SessionContext): Promise<AICommand> {
-    // ── 1. Try rule-based resolution first (fast, no LLM needed) ─────────────
+    // ── 1. Try rule-based resolution first (fast, no AI needed) ──────────────
     const rulebased = tryRuleBased(userMessage, context);
     if (rulebased) {
       logger.info(`Rule-based match: ${JSON.stringify(rulebased)}`);
       return rulebased;
     }
 
-    // ── 2. Fall back to LLM ──────────────────────────────────────────────────
+    // ── 2. Route complex tasks to Groq, simple tasks to Ollama ───────────────
+    const useGroq = groqEngine.isAvailable && this.isComplexTask(userMessage);
+    logger.info(`Routing to ${useGroq ? 'Groq' : 'Ollama'}: "${userMessage.substring(0, 80)}"`);
+
+    if (useGroq) {
+      try {
+        const memCtx = await memoryService.getContextString();
+        return await groqEngine.parseIntent(userMessage, memCtx);
+      } catch (err) {
+        logger.warn(`Groq parseIntent failed, falling back to Ollama: ${(err as Error).message}`);
+        // Fall through to Ollama
+      }
+    }
+
+    // ── 3. Ollama (local LLM) ─────────────────────────────────────────────────
     const fullPrompt = `${this.getSystemPrompt()}\n\nUser: "${userMessage}"\nJSON:`;
 
-    // Try up to 2 times — sometimes Llama wraps the JSON on first attempt
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const raw = await this.generate(fullPrompt, 'json');
@@ -375,18 +425,20 @@ User: "How are you?"
         return parsed as AICommand;
       } catch (error: unknown) {
         const msg = (error as Error).message;
-        logger.warn(`Attempt ${attempt} failed to parse AI response: ${msg}`);
+        logger.warn(`Ollama attempt ${attempt} failed: ${msg}`);
         if (attempt === 2) {
-          logger.error(`Giving up after 2 attempts for: "${userMessage}"`);
-          return {
-            action: 'unknown',
-            params: { originalMessage: userMessage, error: msg },
-          };
+          // Last resort: if Groq is available, try it even for "simple" tasks
+          if (groqEngine.isAvailable) {
+            try {
+              const memCtx = await memoryService.getContextString();
+              return await groqEngine.parseIntent(userMessage, memCtx);
+            } catch { /* ignore */ }
+          }
+          return { action: 'unknown', params: { originalMessage: userMessage, error: msg } };
         }
       }
     }
 
-    // Should never reach here
     return { action: 'unknown', params: { originalMessage: userMessage } };
   }
 
@@ -404,6 +456,15 @@ User: "How are you?"
 
   /** Answer a conversational question as a helpful AI assistant. */
   async chat(question: string): Promise<string> {
+    // Prefer Groq for chat — much faster and higher quality
+    if (groqEngine.isAvailable) {
+      try {
+        const memCtx = await memoryService.getContextString();
+        return await groqEngine.chat(question, memCtx);
+      } catch (err) {
+        logger.warn(`Groq chat failed, falling back to Ollama: ${(err as Error).message}`);
+      }
+    }
     const prompt = `You are Clawd, a helpful and friendly AI assistant. Answer the following question clearly and concisely.\n\nQuestion: ${question}\n\nAnswer:`;
     try {
       return await this.generate(prompt);

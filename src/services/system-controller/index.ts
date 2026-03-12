@@ -6,8 +6,15 @@ import appLauncher from '../../modules/app-launcher';
 import fileManager from '../../modules/file-manager';
 import browserController from '../../modules/browser-controller';
 import commandRunner from '../../modules/command-runner';
+import systemMonitor from '../../modules/system-monitor';
+import emailSender from '../../modules/email-sender';
+import screenAnalyzer from '../../modules/screen-analyzer';
+import notionClient from '../../modules/notion-client';
+import githubManager from '../../modules/github-manager';
 import aiEngine, { SessionContext } from '../ai-engine';
+import groqEngine from '../groq-engine';
 import taskPlanner from '../task-planner';
+import memoryService from '../memory';
 
 /**
  * System Controller Service
@@ -150,10 +157,10 @@ export class SystemController {
 
       case 'clone_repo': {
         const repoUrl = p.url as string;
-        const dest = (p.destination as string) || path.basename(repoUrl, '.git');
-        const cloneDir = path.join(os.homedir(), dest);
-        const result = await commandRunner.execute(`git clone ${repoUrl} "${cloneDir}"`);
-        if (result.success) {
+        const dest = p.destination as string | undefined;
+        const result = await githubManager.cloneRepo(repoUrl, dest);
+        if (result.success && result.data) {
+          const cloneDir = (result.data as { path: string }).path;
           this.updateContext(sessionId, { lastFolder: cloneDir, lastAction: 'clone_repo' });
         }
         return result;
@@ -168,6 +175,94 @@ export class SystemController {
         } catch (error: unknown) {
           return { success: false, message: `Failed to generate content: ${(error as Error).message}` };
         }
+      }
+
+      // ─── NEW ACTIONS ──────────────────────────────────────────────────────
+
+      case 'search_and_clone': {
+        const query = p.query as string;
+        const destination = p.destination as string | undefined;
+        const language = p.language as string | undefined;
+
+        if (!query) return { success: false, message: 'search_and_clone requires a "query" param.' };
+
+        const result = await githubManager.searchAndClone(query, destination, language);
+        if (result.success && result.data) {
+          const cloneDir = (result.data as { path: string }).path;
+          this.updateContext(sessionId, { lastFolder: cloneDir, lastAction: 'search_and_clone' });
+        }
+        return result;
+      }
+
+      case 'open_in_editor': {
+        const targetPath = (p.path as string) || (this.getContext(sessionId).lastFolder as string);
+        const editor = (p.editor as string) || 'vscode';
+
+        if (!targetPath) return { success: false, message: 'open_in_editor requires a "path" param.' };
+        return appLauncher.openInEditor(targetPath, editor);
+      }
+
+      case 'git_deploy': {
+        const localPath = (p.path as string) || (this.getContext(sessionId).lastFolder as string);
+        const repoName = p.repo_name as string;
+        const isPrivate = p.is_private === true;
+
+        if (!localPath) return { success: false, message: 'No local project path specified for git_deploy.' };
+        if (!repoName) return { success: false, message: 'No repo_name specified for git_deploy.' };
+
+        return githubManager.deployToGitHub(localPath, repoName, isPrivate);
+      }
+
+      case 'system_health':
+        return systemMonitor.getHealth();
+
+      case 'send_email': {
+        const to = p.to as string;
+        const subject = (p.subject as string) || 'Message from Clawd';
+        const body = p.body as string;
+
+        if (!to || !body) return { success: false, message: 'send_email requires "to" and "body" params.' };
+        return emailSender.send(to, subject, body);
+      }
+
+      case 'analyze_screen': {
+        if (!groqEngine.isAvailable) {
+          return { success: false, message: 'Screen analysis requires Groq API (vision model). Set GROQ_API_KEY in .env.' };
+        }
+        const question = (p.question as string) || 'Identify any errors, warnings, or problems visible on screen';
+        return screenAnalyzer.captureAndAnalyze(question, (b64, q) => groqEngine.analyzeImage(b64, q));
+      }
+
+      case 'notion_create': {
+        const title = (p.title as string) || 'Untitled';
+        const content = (p.content as string) || '';
+        return notionClient.createPage(title, content);
+      }
+
+      case 'notion_search':
+        return notionClient.searchPages(p.query as string);
+
+      case 'notion_append':
+        return notionClient.appendToPage(p.page_id as string, p.content as string);
+
+      case 'remember_fact': {
+        const key = p.key as string;
+        const value = p.value as string;
+        if (!key || !value) return { success: false, message: 'remember_fact requires "key" and "value".' };
+        await memoryService.remember(key, value);
+        return { success: true, message: `🧠 Remembered: *${key}* = ${value}` };
+      }
+
+      case 'recall_fact': {
+        const key = p.key as string;
+        if (!key) return { success: false, message: 'recall_fact requires a "key".' };
+        if (key === 'all') {
+          const all = await memoryService.getAllFormatted();
+          return { success: true, message: `🧠 *Memory:*\n${all}` };
+        }
+        const value = await memoryService.recall(key);
+        if (value === null) return { success: true, message: `I don't have anything stored for "${key}".` };
+        return { success: true, message: `🧠 *${key}*: ${value}` };
       }
 
       default:

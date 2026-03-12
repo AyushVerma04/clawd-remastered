@@ -11,8 +11,19 @@ export type ActionType =
   | 'write_file'
   | 'read_file'
   | 'delete_file'
-  | 'clone_repo'
+  | 'clone_repo'          // Clone a known, explicit GitHub URL
+  | 'search_and_clone'    // Search GitHub for best matching real repo and clone it
+  | 'open_in_editor'      // Open a folder/file in VS Code, Cursor, etc.
   | 'generate_content'
+  | 'git_deploy'          // git init + commit + push to GitHub
+  | 'system_health'       // CPU / RAM / disk / uptime report
+  | 'send_email'          // SMTP email via nodemailer
+  | 'analyze_screen'      // Screenshot + Groq Vision error analysis
+  | 'notion_create'       // Create a Notion page
+  | 'notion_search'       // Search Notion workspace
+  | 'notion_append'       // Append blocks to a Notion page
+  | 'remember_fact'       // Persist a user fact to memory
+  | 'recall_fact'         // Retrieve facts from memory
   | 'multi_step'
   | 'chat'
   | 'unknown';
@@ -81,6 +92,22 @@ export interface OllamaGenerateRequest {
     num_predict?: number;
   };
 }
+
+// ─── User Memory ─────────────────────────────────────────────────────────────
+
+export interface MemoryFact {
+  key: string;
+  value: string;
+  createdAt: string;
+}
+
+export interface UserMemory {
+  facts: Record<string, MemoryFact>;
+  userProfile: Record<string, string>;
+  lastUpdated: string;
+}
+
+// ─── Ollama Types ───────────────────────────────────────────────────────────
 
 export interface OllamaGenerateResponse {
   model: string;

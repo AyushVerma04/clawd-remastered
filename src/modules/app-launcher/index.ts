@@ -25,13 +25,16 @@ export class AppLauncher {
     if (this.platform === 'win32') {
       return [
         { name: 'Visual Studio Code', aliases: ['vscode', 'vs code', 'code'], command: 'code' },
+        { name: 'Cursor', aliases: ['cursor', 'cursor editor', 'cursor ai'], command: 'cursor' },
+        { name: 'Windsurf', aliases: ['windsurf', 'windsurf editor'], command: 'windsurf' },
         { name: 'Google Chrome', aliases: ['chrome', 'google chrome'], command: 'start chrome' },
         { name: 'Mozilla Firefox', aliases: ['firefox'], command: 'start firefox' },
         { name: 'Microsoft Edge', aliases: ['edge', 'microsoft edge'], command: 'start msedge' },
         { name: 'Notepad', aliases: ['notepad'], command: 'notepad' },
         { name: 'File Explorer', aliases: ['explorer', 'file explorer', 'files'], command: 'explorer' },
-        { name: 'Command Prompt', aliases: ['cmd', 'command prompt', 'terminal'], command: 'start cmd' },
-        { name: 'PowerShell', aliases: ['powershell'], command: 'start powershell' },
+        { name: 'Command Prompt', aliases: ['cmd', 'command prompt'], command: 'start cmd' },
+        { name: 'PowerShell', aliases: ['powershell', 'terminal'], command: 'start powershell' },
+        { name: 'Windows Terminal', aliases: ['windows terminal', 'wt'], command: 'wt' },
         { name: 'Task Manager', aliases: ['task manager', 'taskmgr'], command: 'taskmgr' },
         { name: 'Calculator', aliases: ['calculator', 'calc'], command: 'calc' },
         { name: 'Spotify', aliases: ['spotify'], command: 'start spotify:' },
@@ -44,8 +47,10 @@ export class AppLauncher {
         { name: 'Microsoft PowerPoint', aliases: ['powerpoint', 'ppt'], command: 'start powerpnt' },
         { name: 'Paint', aliases: ['paint', 'mspaint'], command: 'mspaint' },
         { name: 'Snipping Tool', aliases: ['snipping tool', 'screenshot'], command: 'snippingtool' },
-        { name: 'Windows Terminal', aliases: ['windows terminal', 'wt'], command: 'wt' },
         { name: 'Git Bash', aliases: ['git bash', 'bash'], command: 'start "" "C:\\Program Files\\Git\\git-bash.exe"' },
+        { name: 'Postman', aliases: ['postman'], command: 'start "" "%LOCALAPPDATA%\\Postman\\Postman.exe"' },
+        { name: 'Figma', aliases: ['figma'], command: 'start "" "%LOCALAPPDATA%\\Figma\\Figma.exe"' },
+        { name: 'Obsidian', aliases: ['obsidian'], command: 'start "" "%LOCALAPPDATA%\\Obsidian\\Obsidian.exe"' },
       ];
     }
 
@@ -139,6 +144,42 @@ export class AppLauncher {
   /** List all registered applications. */
   listApps(): string[] {
     return this.registry.map((app) => app.name);
+  }
+
+  /**
+   * Open a folder or file in a code editor (VS Code, Cursor, Windsurf).
+   * Falls back gracefully if the preferred editor isn't installed.
+   */
+  async openInEditor(targetPath: string, editor = 'vscode'): Promise<ExecutionResult> {
+    const editorKey = editor.toLowerCase().replace(/\s/g, '');
+
+    const editorCommands: Record<string, { cmd: string; name: string }[]> = {
+      vscode:    [{ cmd: 'code', name: 'VS Code' }],
+      cursor:    [{ cmd: 'cursor', name: 'Cursor' }, { cmd: 'code', name: 'VS Code' }],
+      windsurf:  [{ cmd: 'windsurf', name: 'Windsurf' }, { cmd: 'code', name: 'VS Code' }],
+      // aliases
+      vscodium:  [{ cmd: 'codium', name: 'VSCodium' }, { cmd: 'code', name: 'VS Code' }],
+    };
+
+    const candidates = editorCommands[editorKey] || editorCommands['vscode'];
+    const shell = this.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
+
+    for (const { cmd, name } of candidates) {
+      try {
+        logger.info(`Opening "${targetPath}" in ${name}`);
+        await execAsync(`${cmd} "${targetPath}"`, { timeout: 10_000, shell });
+        return { success: true, message: `Opened in ${name}: \`${targetPath}\`` };
+      } catch {
+        // try next candidate
+      }
+    }
+
+    // Ultimate fallback: open in file explorer so the user can open it manually
+    await this.launch('File Explorer', `"${targetPath}"`).catch(() => {});
+    return {
+      success: false,
+      message: `Could not find ${candidates.map(c => c.name).join(' or ')}. Opened folder in File Explorer instead.\nMake sure your editor's CLI is in PATH (e.g. \`code\` for VS Code).`,
+    };
   }
 }
 
