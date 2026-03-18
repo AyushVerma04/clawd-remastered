@@ -1,4 +1,4 @@
-# 🤖 Clawd AI Assistant
+# Project Axiom
 
 A **fully local AI automation assistant** controlled through **Telegram**, powered by **Ollama + Llama 3.1**. It runs entirely on your computer, can launch apps, manage files, browse the web, clone repos, and execute multi-step tasks — all from a Telegram chat.
 
